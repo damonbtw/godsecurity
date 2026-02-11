@@ -5,6 +5,9 @@ if not _G.NPCPath then
     _G.NPCPath = "Workspace.WorldInfo.Live" -- Default to your game
 end
 
+--// YOUR USERNAME - Change this if needed
+local MY_USERNAME = "princeofbenevolence"
+
 --// Load the DXLib UI library
 local Lib = loadstring(dx9.Get("https://raw.githubusercontent.com/damonbtw/WHATISASKID/refs/heads/main/skiddingwhattt.lua"))()
 
@@ -78,6 +81,7 @@ MainBox:AddLabel("NPC Path: " .. _G.NPCPath, {160, 160, 170})
 local AimbotBox = AimbotTab:AddMiddleGroupbox("Aimbot Configuration")
 
 local aimbotEnabled = AimbotBox:AddToggle({ Text = "Aimbot Enabled", Default = false })
+local stickyAimEnabled = AimbotBox:AddToggle({ Text = "Sticky Aim", Default = false })
 
 local aimbotPart = AimbotBox:AddDropdown({
     Text = "Aimbot Part",
@@ -91,7 +95,7 @@ local firstPersonSmoothness = AimbotBox:AddSlider({
     Text = "First Person Smoothness",
     Min = 1,
     Max = 50,
-    Default = 1,
+    Default = 10,
     Rounding = 0
 })
 
@@ -99,7 +103,7 @@ local firstPersonSensitivity = AimbotBox:AddSlider({
     Text = "First Person Sensitivity",
     Min = 1,
     Max = 50,
-    Default = 1,
+    Default = 10,
     Rounding = 0
 })
 
@@ -109,7 +113,7 @@ local thirdPersonVertical = AimbotBox:AddSlider({
     Text = "Third Person Vertical Smoothness",
     Min = 1,
     Max = 50,
-    Default = 1,
+    Default = 10,
     Rounding = 0
 })
 
@@ -117,7 +121,7 @@ local thirdPersonHorizontal = AimbotBox:AddSlider({
     Text = "Third Person Horizontal Smoothness",
     Min = 1,
     Max = 50,
-    Default = 1,
+    Default = 10,
     Rounding = 0
 })
 
@@ -141,6 +145,10 @@ local aimbotRange = AimbotBox:AddSlider({
 })
 
 local showFOVCircle = AimbotBox:AddToggle({ Text = "Show FOV Circle", Default = true })
+
+AimbotBox:AddBlank(5)
+AimbotBox:AddLabel("Sticky: Stays locked when target", {160, 160, 170})
+AimbotBox:AddLabel("leaves FOV", {160, 160, 170})
 
 --// ── Settings Tab ───────────────────────────────────────────────────────────
 local UIBox = SettingsTab:AddLeftGroupbox("UI Customization")
@@ -301,6 +309,14 @@ function IsOnScreen(screen_pos)
     return false
 end
 
+function IsMyself(entity)
+    local entityName = dx9.GetName(entity)
+    if entityName and entityName:lower() == MY_USERNAME:lower() then
+        return true
+    end
+    return false
+end
+
 function IsTeammate(targetName)
     if not teamCheck.Value or not PlayersService then return false end
     
@@ -361,6 +377,8 @@ function BoxESP(params)
     local target = params.Target
     
     if type(target) ~= "number" or dx9.GetChildren(target) == nil then return end
+    
+    if IsMyself(target) then return end
     
     local hrp = dx9.FindFirstChild(target, "HumanoidRootPart") or dx9.FindFirstChild(target, "Torso")
     if not hrp then return end
@@ -476,12 +494,14 @@ end
 local aimbot_target_address = nil
 local aimbot_target_screen_pos = nil
 local lastAimbotFrame = nil
+local sticky_target = nil
 
 --// Aimbot Task
 function AimbotTask()
     if not aimbotEnabled.Value then
         aimbot_target_address = nil
         aimbot_target_screen_pos = nil
+        sticky_target = nil
         return
     end
     
@@ -497,40 +517,92 @@ function AimbotTask()
     local my_root_pos = lp.Position
     local screen_size = dx9.size()
     
+    -- STICKY AIM: Keep tracking the sticky target
+    if stickyAimEnabled.Value and sticky_target then
+        local humanoid = dx9.FindFirstChild(sticky_target, "Humanoid")
+        if humanoid then
+            local health = dx9.GetHealth(humanoid)
+            if health and health > 0 then
+                local root = dx9.FindFirstChild(sticky_target, "HumanoidRootPart") or dx9.FindFirstChild(sticky_target, "Torso")
+                local head = dx9.FindFirstChild(sticky_target, "Head")
+                
+                if root and head then
+                    local root_pos = dx9.GetPosition(root)
+                    local head_pos = dx9.GetPosition(head)
+                    
+                    if root_pos and head_pos then
+                        local root_distance = GetDistance(my_root_pos, root_pos)
+                        
+                        -- Only check range, NOT FOV or screen position
+                        if root_distance <= aimbotRange.Value then
+                            local root_screen = dx9.WorldToScreen({root_pos.x, root_pos.y, root_pos.z})
+                            local head_screen = dx9.WorldToScreen({head_pos.x, head_pos.y, head_pos.z})
+                            local screen_pos = (aimbotPart.Value == "Head") and head_screen or root_screen
+                            
+                            aimbot_target_address = sticky_target
+                            aimbot_target_screen_pos = screen_pos
+                            
+                            -- Apply aim smoothly
+                            if screen_pos then
+                                dx9.FirstPersonAim({
+                                    screen_pos.x + screen_size.width/2,
+                                    screen_pos.y + screen_size.height/2
+                                }, firstPersonSmoothness.Value, firstPersonSensitivity.Value)
+                                
+                                if not dx9.isRightClickHeld() then
+                                    dx9.ThirdPersonAim({
+                                        screen_pos.x,
+                                        screen_pos.y
+                                    }, thirdPersonHorizontal.Value, thirdPersonVertical.Value)
+                                end
+                            end
+                            
+                            return -- Keep this sticky target
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Target died or out of range
+        sticky_target = nil
+        aimbot_target_address = nil
+        aimbot_target_screen_pos = nil
+    end
+    
+    -- NORMAL AIMBOT: Find new target
     local closest_target = nil
     local closest_value = nil
     local closest_screen_pos = nil
     
     for _, entity in ipairs(entities) do
-        local root = dx9.FindFirstChild(entity, "HumanoidRootPart") or dx9.FindFirstChild(entity, "Torso")
-        local head = dx9.FindFirstChild(entity, "Head")
-        local humanoid = dx9.FindFirstChild(entity, "Humanoid")
-        
-        if root and head and humanoid then
-            local health = dx9.GetHealth(humanoid)
-            if health and health > 0 then
-                local root_pos = dx9.GetPosition(root)
-                local head_pos = dx9.GetPosition(head)
-                
-                if root_pos and head_pos then
-                    local root_distance = GetDistance(my_root_pos, root_pos)
-                    local root_screen = dx9.WorldToScreen({root_pos.x, root_pos.y, root_pos.z})
-                    local head_screen = dx9.WorldToScreen({head_pos.x, head_pos.y, head_pos.z})
+        if not IsMyself(entity) then
+            local root = dx9.FindFirstChild(entity, "HumanoidRootPart") or dx9.FindFirstChild(entity, "Torso")
+            local head = dx9.FindFirstChild(entity, "Head")
+            local humanoid = dx9.FindFirstChild(entity, "Humanoid")
+            
+            if root and head and humanoid then
+                local health = dx9.GetHealth(humanoid)
+                if health and health > 0 then
+                    local root_pos = dx9.GetPosition(root)
+                    local head_pos = dx9.GetPosition(head)
                     
-                    local screen_pos = (aimbotPart.Value == "Head") and head_screen or root_screen
-                    
-                    if IsOnScreen(screen_pos) then
-                        if entity == aimbot_target_address then
-                            aimbot_target_screen_pos = screen_pos
-                        end
+                    if root_pos and head_pos then
+                        local root_distance = GetDistance(my_root_pos, root_pos)
+                        local root_screen = dx9.WorldToScreen({root_pos.x, root_pos.y, root_pos.z})
+                        local head_screen = dx9.WorldToScreen({head_pos.x, head_pos.y, head_pos.z})
                         
-                        local mouse_distance = GetDistanceFromMouse(screen_pos)
+                        local screen_pos = (aimbotPart.Value == "Head") and head_screen or root_screen
                         
-                        if mouse_distance <= aimbotFOV.Value and root_distance <= aimbotRange.Value then
-                            if closest_value == nil or mouse_distance < closest_value then
-                                closest_target = entity
-                                closest_value = mouse_distance
-                                closest_screen_pos = screen_pos
+                        if IsOnScreen(screen_pos) then
+                            local mouse_distance = GetDistanceFromMouse(screen_pos)
+                            
+                            if mouse_distance <= aimbotFOV.Value and root_distance <= aimbotRange.Value then
+                                if closest_value == nil or mouse_distance < closest_value then
+                                    closest_target = entity
+                                    closest_value = mouse_distance
+                                    closest_screen_pos = screen_pos
+                                end
                             end
                         end
                     end
@@ -542,21 +614,23 @@ function AimbotTask()
     aimbot_target_address = closest_target
     aimbot_target_screen_pos = closest_screen_pos
     
-    if aimbot_target_address and IsOnScreen(aimbot_target_screen_pos) then
-        if not lastAimbotFrame or (os.clock() - lastAimbotFrame) > (1/30) then
-            dx9.FirstPersonAim({
-                aimbot_target_screen_pos.x + screen_size.width/2,
-                aimbot_target_screen_pos.y + screen_size.height/2
-            }, firstPersonSmoothness.Value, firstPersonSensitivity.Value)
-            
-            if not dx9.isRightClickHeld() then
-                dx9.ThirdPersonAim({
-                    aimbot_target_screen_pos.x,
-                    aimbot_target_screen_pos.y
-                }, thirdPersonHorizontal.Value, thirdPersonVertical.Value)
-            end
-            
-            lastAimbotFrame = os.clock()
+    -- Set sticky target
+    if stickyAimEnabled.Value and aimbot_target_address then
+        sticky_target = aimbot_target_address
+    end
+    
+    -- Apply aim
+    if aimbot_target_address and aimbot_target_screen_pos and IsOnScreen(aimbot_target_screen_pos) then
+        dx9.FirstPersonAim({
+            aimbot_target_screen_pos.x + screen_size.width/2,
+            aimbot_target_screen_pos.y + screen_size.height/2
+        }, firstPersonSmoothness.Value, firstPersonSensitivity.Value)
+        
+        if not dx9.isRightClickHeld() then
+            dx9.ThirdPersonAim({
+                aimbot_target_screen_pos.x,
+                aimbot_target_screen_pos.y
+            }, thirdPersonHorizontal.Value, thirdPersonVertical.Value)
         end
     end
 end
@@ -589,11 +663,6 @@ coroutine.wrap(function()
             dx9.DrawCircle(center, {255, 255, 255}, aimbotFOV.Value)
         end
         
-        -- Target indicator
-        if aimbot_target_address and aimbot_target_screen_pos and IsOnScreen(aimbot_target_screen_pos) then
-            dx9.DrawCircle({aimbot_target_screen_pos.x, aimbot_target_screen_pos.y}, {255, 255, 255}, 15)
-        end
-        
         -- Watermark
         if watermarkEnabled.Value then
             local screenW = dx9.size().width
@@ -615,4 +684,4 @@ coroutine.wrap(function()
     end
 end)()
 
-Lib:Notify("ESP + Aimbot Loaded! Path: " .. _G.NPCPath, 3)
+Lib:Notify("ESP + Aimbot Loaded! Protected: " .. MY_USERNAME, 3)
