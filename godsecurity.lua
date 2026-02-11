@@ -214,6 +214,7 @@ local pathDropdown = PathBox:AddDropdown({
     Values = {
         "Workspace.WorldInfo.Live",
         "Workspace.Characters",
+        "Workspace",
         "Workspace.Character",
         "Workspace.Enemies",
         "Workspace.Enemy",
