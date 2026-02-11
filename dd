@@ -1,0 +1,14 @@
+loadstring(dx9.Get("https://raw.githubusercontent.com/damonbtw/Versing/main/versing.lua"))()
+
+loadstring(dx9.Get("https://raw.githubusercontent.com/damonbtw/godsecurity/main/godsecurity.lua"))()
+
+
+_G.NPCPath = "Workspace.Characters"    -- Add npc path here
+
+loadstring(dx9.Get("https://raw.githubusercontent.com/damonbtw/godsecurity/main/godsecurity.lua"))()
+
+
+
+loadstring(dx9.Get("https://raw.githubusercontent.com/damonbtw/pather/refs/heads/main/pathing.lua"))()        -- Use to find paths by crosshair
+
+
